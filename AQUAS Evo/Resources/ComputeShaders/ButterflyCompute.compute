@@ -1,0 +1,241 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+RWTexture2D<float4> Result;
+
+Texture2D<float4> _TwiddleIndices;
+SamplerState sampler_TwiddleIndices;
+
+Texture2D<float4> _BitReversedIndices;
+SamplerState sampler_BitReversedIndices;
+
+Texture2D<float4> _hktTex;
+SamplerState sampler_hktTex;
+
+int _N;             // FFT resolution
+int _type;          // Result type
+
+int _direction;     // Butterfly Direction
+int _i;             // Butterfly index
+
+struct complex
+{
+    float re;
+    float im;
+};
+
+complex mul(complex c0, complex c1)
+{
+    complex c;
+    c.re = c0.re * c1.re - c0.im * c1.im;
+    c.im = c0.re * c1.im + c0.im * c1.re;
+    return c;
+}
+
+complex add(complex c0, complex c1)
+{
+    complex c;
+    c.re = c0.re + c1.re;
+    c.im = c0.im + c1.im;
+    return c;
+}
+
+complex subtract(complex c0, complex c1)
+{
+    complex c;
+    c.re = c0.re - c1.re;
+    c.im = c0.im - c1.im;
+    return c;
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    float2 pointUV = id.xy / float2(_N, _N);
+
+    float pow2i = pow(2.0, _i) / float(_N);
+    float i2 = (_i + 0.5) / log2(float(_N));
+
+    int n;
+    if (_direction == 0)
+    {
+        n = int(pointUV.y * float(_N));
+    }
+    else
+    {
+        n = int(pointUV.x * float(_N));
+    }
+
+    int a = n % int(pow(2.0, _i + 1.0));
+    int b = int(pow(2.0, _i));
+
+    float4 result;
+
+    if (a < b)
+    {
+        float bri1;
+        float bri2;
+
+        float4 hkt1;
+        float4 hkt2;
+
+        float2 twiddleIndex;
+
+        if (_direction == 0)
+        {
+            if (_i == 0)
+            {
+                bri1 = _BitReversedIndices.SampleLevel(sampler_BitReversedIndices, float2(0.5, pointUV.y), 0.0).x / float(_N);
+                bri2 = _BitReversedIndices.SampleLevel(sampler_BitReversedIndices, float2(0.5, pointUV.y + pow2i), 0.0).x / float(_N);
+            }
+            else
+            {
+                bri1 = pointUV.y;
+                bri2 = pointUV.y + pow2i;
+            }
+
+            hkt1 = _hktTex.SampleLevel(sampler_hktTex, float2(pointUV.x, bri1), 0.0);
+            hkt2 = _hktTex.SampleLevel(sampler_hktTex, float2(pointUV.x, bri2), 0.0);
+
+            twiddleIndex = _TwiddleIndices.SampleLevel(sampler_TwiddleIndices, float2(i2, (pointUV.y + pow2i)), 0.0).rg;
+        }
+        else
+        {
+            if (_i == 0)
+            {
+                bri1 = _BitReversedIndices.SampleLevel(sampler_BitReversedIndices, float2(0.5, pointUV.x), 0.0).x / float(_N);
+                bri2 = _BitReversedIndices.SampleLevel(sampler_BitReversedIndices, float2(0.5, pointUV.x + pow2i), 0.0).x / float(_N);
+            }
+            else
+            {
+                bri1 = pointUV.x;
+                bri2 = pointUV.x + pow2i;
+            }
+
+            hkt1 = _hktTex.SampleLevel(sampler_hktTex, float2(bri1, pointUV.y), 0.0);
+            hkt2 = _hktTex.SampleLevel(sampler_hktTex, float2(bri2, pointUV.y), 0.0);
+
+            twiddleIndex = _TwiddleIndices.SampleLevel(sampler_TwiddleIndices, float2(i2, (pointUV.x + pow2i)), 0.0).rg;
+        }
+
+        complex hkTime1;
+        hkTime1.re = hkt1.r;
+        hkTime1.im = hkt1.g;
+
+        complex hkTime2;
+        hkTime2.re = hkt2.r;
+        hkTime2.im = hkt2.g;
+
+        complex twiddleFactor;
+        twiddleFactor.re = twiddleIndex.r;
+        twiddleFactor.im = twiddleIndex.g;
+
+        if (_type == 0)
+        {
+            result.x = add(hkTime1, mul(hkTime2, twiddleFactor)).re;
+            result.y = add(hkTime1, mul(hkTime2, twiddleFactor)).im;
+            result.z = 0.0;
+            result.w = 1.0;
+        }
+        else
+        {
+            complex hkTime1b;
+            hkTime1b.re = hkt1.b;
+            hkTime1b.im = hkt1.a;
+
+            complex hkTime2b;
+            hkTime2b.re = hkt2.b;
+            hkTime2b.im = hkt2.a;
+
+            result.x = add(hkTime1, mul(hkTime2, twiddleFactor)).re;
+            result.y = add(hkTime1, mul(hkTime2, twiddleFactor)).im;
+            result.z = add(hkTime1b, mul(hkTime2b, twiddleFactor)).re;
+            result.w = add(hkTime1b, mul(hkTime2b, twiddleFactor)).im;
+        }
+    }
+    else
+    {
+        float bri1;
+        float bri2;
+
+        float4 hkt1;
+        float4 hkt2;
+
+        float2 twiddleIndex;
+
+        if (_direction == 0)
+        {
+            if (_i == 0)
+            {
+                bri1 = _BitReversedIndices.SampleLevel(sampler_BitReversedIndices, float2(0.5, pointUV.y - pow2i), 0.0).x / float(_N);
+                bri2 = _BitReversedIndices.SampleLevel(sampler_BitReversedIndices, float2(0.5, pointUV.y), 0.0).x / float(_N);
+            }
+            else
+            {
+                bri1 = pointUV.y - pow2i;
+                bri2 = pointUV.y;
+            }
+
+            hkt1 = _hktTex.SampleLevel(sampler_hktTex, float2(pointUV.x, bri1), 0.0);
+            hkt2 = _hktTex.SampleLevel(sampler_hktTex, float2(pointUV.x, bri2), 0.0);
+
+            twiddleIndex = _TwiddleIndices.SampleLevel(sampler_TwiddleIndices, float2(i2, pointUV.y), 0.0).rg;
+        }
+        else
+        {
+            if (_i == 0)
+            {
+                bri1 = _BitReversedIndices.SampleLevel(sampler_BitReversedIndices, float2(0.5, pointUV.x - pow2i), 0.0).x / float(_N);
+                bri2 = _BitReversedIndices.SampleLevel(sampler_BitReversedIndices, float2(0.5, pointUV.x), 0.0).x / float(_N);
+            }
+            else
+            {
+                bri1 = pointUV.x - pow2i;
+                bri2 = pointUV.x;
+            }
+
+            hkt1 = _hktTex.SampleLevel(sampler_hktTex, float2(bri1, pointUV.y), 0.0);
+            hkt2 = _hktTex.SampleLevel(sampler_hktTex, float2(bri2, pointUV.y), 0.0);
+
+            twiddleIndex = _TwiddleIndices.SampleLevel(sampler_TwiddleIndices, float2(i2, pointUV.x), 0.0).rg;
+        }
+
+        complex hkTime1;
+        hkTime1.re = hkt1.r;
+        hkTime1.im = hkt1.g;
+
+        complex hkTime2;
+        hkTime2.re = hkt2.r;
+        hkTime2.im = hkt2.g;
+
+        complex twiddleFactor;
+        twiddleFactor.re = twiddleIndex.r;
+        twiddleFactor.im = twiddleIndex.g;
+
+        if (_type == 0)
+        {
+            result.x = subtract(hkTime1, mul(hkTime2, twiddleFactor)).re;
+            result.y = subtract(hkTime1, mul(hkTime2, twiddleFactor)).im;
+            result.z = 0.0;
+            result.w = 1.0;
+        }
+        else
+        {
+            complex hkTime1b;
+            hkTime1b.re = hkt1.b;
+            hkTime1b.im = hkt1.a;
+
+            complex hkTime2b;
+            hkTime2b.re = hkt2.b;
+            hkTime2b.im = hkt2.a;
+
+            result.x = subtract(hkTime1, mul(hkTime2, twiddleFactor)).re;
+            result.y = subtract(hkTime1, mul(hkTime2, twiddleFactor)).im;
+            result.z = subtract(hkTime1b, mul(hkTime2b, twiddleFactor)).re;
+            result.w = subtract(hkTime1b, mul(hkTime2b, twiddleFactor)).im;
+        }
+    }
+
+    Result[id.xy] = result;
+    //Result[id.xy] = float4(id.x/float(_N), 0, 0, 1);
+}

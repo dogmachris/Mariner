@@ -1,0 +1,43 @@
+#pragma kernel CSMain
+
+// Input texture
+Texture2D<float4> _inputTex;
+SamplerState sampler_inputTex;
+
+// Output texture
+RWTexture2D<float4> Result;
+
+int _N;         // Grid Size
+int _type;      // Result Type
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    // Calculate UV coordinates
+    float2 uv = float2(id.xy) / float2(_N, _N);
+
+    // Sample the input texture
+    float4 c = _inputTex.SampleLevel(sampler_inputTex, uv, 0.0f);
+
+    // Define permutations array
+    float perms[2] = { 1.0f, -1.0f };
+
+    // Calculate the permutation index
+    int index = int((int((uv.x * _N) + (uv.y * _N)) % 2));
+    float perm = perms[index];
+
+    float4 result;
+
+    // Perform the necessary scaling and permutation based on _type
+    if (_type == 0)
+    {
+        result = float4(0, (c.r / (_N * _N)) * perm, 0, 1);
+    }
+    else
+    {
+        result = float4((c.r / (_N * _N)) * perm, 1, (c.b / (_N * _N)) * perm, 1);
+    }
+
+    // Write the result to the output texture
+    Result[id.xy] = result;
+}

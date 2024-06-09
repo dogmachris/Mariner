@@ -1,0 +1,69 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+
+Texture2D<float4> _GaussRand;
+SamplerState sampler_GaussRand;
+
+int _N;             // FFT resolution
+float _L;           // FFT Patch length
+float _windSpeed;   // wind speed in m/s
+float2 _windDir;    // wind direction vector
+float _A;           // numerical constant
+
+static const float pi = 3.14159265359;
+static const float g = 9.81;
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    float2 i_uv = float2(id.xy) / float(_N);
+
+    float m = i_uv.x * _N - (float(_N) / 2.0);
+    float n = i_uv.y * _N - (float(_N) / 2.0);
+
+    float2 k;       // wave vector
+    k.x = (2 * pi * m) / _L;
+    k.y = (2 * pi * n) / _L;
+
+    float2 windDir = normalize(float2(_windDir.x, _windDir.y));
+    float L_ = (_windSpeed * _windSpeed) / g;
+
+    float mag = length(k);
+
+    if (mag < 0.0001)
+    {
+        mag = 0.0001;
+    }
+
+    float magSq = mag * mag;
+
+    float term1 = exp((-1.0) / (magSq * L_ * L_));
+    float term2 = magSq * magSq;
+    float term3_k = pow(dot(normalize(k), windDir), 6);
+    float term3_Minusk = pow(dot(normalize(-k), windDir), 6);
+    float term4 = exp(-pow(mag, 2) * pow(L_ / 1000.0, 2));
+
+    float ph_k = _A * (term1 / term2) * term3_k; // * term4;
+    float ph_Minusk = _A * (term1 / term2) * term3_Minusk; // * term4;
+
+    // Sample the input texture using the texture object, not the sampler
+    float4 c = _GaussRand.SampleLevel(sampler_GaussRand, i_uv, 0.0);
+
+    float h_0r = (c.r * sqrt(ph_k)) / sqrt(2.0);
+    float h_0g = (c.g * sqrt(ph_k)) / sqrt(2.0);
+    float h_0b = (c.b * sqrt(ph_Minusk)) / sqrt(2.0);
+    float h_0a = (c.a * sqrt(ph_Minusk)) / sqrt(2.0);
+
+    float4 result;
+
+    result.x = h_0r;
+    result.y = h_0g;
+    result.z = h_0b;
+    result.w = h_0a;
+
+    Result[id.xy] = result;
+}

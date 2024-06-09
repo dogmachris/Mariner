@@ -1,0 +1,111 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+
+Texture2D<float4> _h0Tex;
+SamplerState sampler_h0Tex;
+
+int _N;             // FFT resolution
+float _L;           // FFT Patch length
+
+float4 _Time;
+
+static const float pi = 3.14159265359;
+static const float g = 9.81;
+
+struct complex
+{
+	float re;
+	float im;
+};
+
+complex mul(complex c0, complex c1)
+{
+	complex c;
+	c.re = c0.re * c1.re - c0.im * c1.im;
+	c.im = c0.re * c1.im + c0.im * c1.re;
+	return c;
+}
+
+complex add(complex c0, complex c1)
+{
+	complex c;
+	c.re = c0.re + c1.re;
+	c.im = c0.im + c1.im;
+	return c;
+}
+
+complex subtract(complex c0, complex c1)
+{
+	complex c;
+	c.re = c0.re - c1.re;
+	c.im = c0.im - c1.im;
+	return c;
+}
+
+complex conj(complex c)
+{
+	complex cConj;
+	cConj.re = c.re;
+	cConj.im = -c.im;
+	return cConj;
+}
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+	float2 i_uv = float2(id.xy) / float(_N);
+
+	// Sample the input texture using the texture object, not the sampler
+	float4 c = _h0Tex.SampleLevel(sampler_h0Tex, i_uv, 0.0);
+
+	float m = i_uv.x * _N - (float(_N) / 2.0);
+	float n = i_uv.y * _N - (float(_N) / 2.0);
+
+	float2 k;       // wave vector
+	k.x = (2 * pi * m) / _L;
+	k.y = (2 * pi * n) / _L;
+
+	float mag = length(k);
+
+	if (mag < 0.0001)
+	{
+		mag = 0.0001;
+	}
+
+	float w = sqrt(g * mag);
+
+	complex tilde_h0k;
+	tilde_h0k.re = c.r;
+	tilde_h0k.im = c.g;
+
+	complex tilde_h0MinuskConj;
+	tilde_h0MinuskConj.re = c.b;
+	tilde_h0MinuskConj.im = c.a;
+	tilde_h0MinuskConj = conj(tilde_h0MinuskConj);
+
+	// Euler formula
+	complex exp_iwt;
+	exp_iwt.re = cos(w * _Time.y);
+	exp_iwt.im = sin(w * _Time.y);
+
+	complex exp_iwt_inv;
+	exp_iwt_inv.re = cos(w * _Time.y);
+	exp_iwt_inv.im = -sin(w * _Time.y);
+
+	// dy
+	complex h_kt_dy;
+	h_kt_dy = add(mul(tilde_h0k, exp_iwt), mul(tilde_h0MinuskConj, exp_iwt_inv));
+
+	float4 result;
+
+	result.x = h_kt_dy.re;
+	result.y = h_kt_dy.im;
+	result.z = 0;
+	result.w = 1;
+
+	Result[id.xy] = result;
+}
